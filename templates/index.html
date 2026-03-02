@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Bot - Order Tracker</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2em;
+            background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 24px;
+            font-size: 0.9em;
+        }
+        .status-bar {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 12px 20px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 12px;
+            font-size: 1.1em;
+        }
+        .status-bar .label { color: #aaa; }
+        .status-bar .value { color: #00d2ff; font-weight: 700; }
+
+        /* Messages */
+        .msg {
+            padding: 12px 18px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            text-align: center;
+        }
+        .msg.success { background: rgba(0, 200, 83, 0.2); border: 1px solid #00c853; color: #69f0ae; }
+        .msg.error   { background: rgba(255, 23, 68, 0.2); border: 1px solid #ff1744; color: #ff8a80; }
+
+        /* Buttons */
+        .btn-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-bottom: 40px;
+        }
+        .step-btn {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 18px 24px;
+            border: none;
+            border-radius: 14px;
+            font-size: 1.15em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: #fff;
+        }
+        .step-btn .num {
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.9em; font-weight: 700;
+            flex-shrink: 0;
+        }
+        .step-btn.active {
+            background: linear-gradient(135deg, #00c853, #00bfa5);
+            box-shadow: 0 4px 20px rgba(0, 200, 83, 0.4);
+        }
+        .step-btn.active .num { background: rgba(255,255,255,0.25); }
+        .step-btn.active:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 28px rgba(0, 200, 83, 0.5);
+        }
+        .step-btn.done {
+            background: rgba(0, 200, 83, 0.15);
+            border: 1px solid rgba(0, 200, 83, 0.3);
+            cursor: default;
+            color: #69f0ae;
+        }
+        .step-btn.done .num { background: rgba(0, 200, 83, 0.3); }
+        .step-btn.done::after {
+            content: '✓';
+            margin-left: auto;
+            font-size: 1.3em;
+        }
+        .step-btn.disabled {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            cursor: not-allowed;
+            color: #666;
+        }
+        .step-btn.disabled .num { background: rgba(255,255,255,0.08); }
+
+        /* Section headers */
+        h2 {
+            margin-top: 30px;
+            margin-bottom: 14px;
+            color: #aaa;
+            font-size: 1.1em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Tables */
+        .data-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .data-table th {
+            background: rgba(255,255,255,0.08);
+            padding: 12px 14px;
+            text-align: left;
+            font-weight: 600;
+            color: #aaa;
+            font-size: 0.8em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .data-table td {
+            padding: 10px 14px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.9em;
+        }
+        .data-table tr:hover td { background: rgba(255,255,255,0.03); }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.78em;
+            font-weight: 600;
+        }
+        .badge.pending   { background: rgba(255,193,7,0.2); color: #ffd54f; }
+        .badge.completed { background: rgba(0,200,83,0.2); color: #69f0ae; }
+        .badge.sent      { background: rgba(33,150,243,0.2); color: #90caf9; }
+        .badge.confirmed { background: rgba(156,39,176,0.2); color: #ce93d8; }
+
+        /* Notify button */
+        .notify-btn {
+            padding: 5px 14px;
+            border: 1px solid rgba(33,150,243,0.4);
+            border-radius: 8px;
+            background: rgba(33,150,243,0.15);
+            color: #90caf9;
+            font-size: 0.8em;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .notify-btn:hover {
+            background: rgba(33,150,243,0.3);
+            transform: translateY(-1px);
+        }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 4px; margin-bottom: 0; }
+        .tab {
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-bottom: none;
+            border-radius: 10px 10px 0 0;
+            color: #888;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .tab.active { background: rgba(255,255,255,0.1); color: #fff; }
+        .tab:hover { color: #ccc; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* API reference */
+        .api-ref {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+        }
+        .api-ref code {
+            background: rgba(0,0,0,0.3);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: #69f0ae;
+        }
+        .api-ref .method {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            font-weight: 700;
+            margin-right: 6px;
+        }
+        .api-ref .get  { background: rgba(0,200,83,0.2); color: #69f0ae; }
+        .api-ref .post { background: rgba(33,150,243,0.2); color: #90caf9; }
+        .api-row { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .api-row:last-child { border-bottom: none; }
+        .api-desc { color: #888; font-size: 0.82em; margin-top: 2px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📦 Order Tracker</h1>
+        <p class="subtitle">WhatsApp Notification System &middot; Procurement Workflow</p>
+
+        <div class="status-bar">
+            <span class="label">Current Status: </span>
+            <span class="value">
+                {% if current_status %}
+                    {{ current_status }}
+                {% else %}
+                    No active order
+                {% endif %}
+            </span>
+            {% if latest %}
+                <span class="label"> &nbsp;|&nbsp; Order #{{ latest.order_id }}</span>
+            {% endif %}
+        </div>
+
+        {% if msg %}
+        <div class="msg success">{{ msg }}</div>
+        {% endif %}
+        {% if error %}
+        <div class="msg error">{{ error }}</div>
+        {% endif %}
+
+        <!-- ── Workflow Buttons ── -->
+        <div class="btn-stack">
+            {% for step in steps %}
+                {% set idx = loop.index0 %}
+                {% if idx < active_index %}
+                    <div class="step-btn done">
+                        <span class="num">{{ loop.index }}</span>
+                        {{ step.label }}
+                    </div>
+                {% elif idx == active_index %}
+                    <form method="post" action="/action/{{ step.action }}" style="display:contents;">
+                        <button type="submit" class="step-btn active">
+                            <span class="num">{{ loop.index }}</span>
+                            {{ step.label }}
+                        </button>
+                    </form>
+                {% else %}
+                    <div class="step-btn disabled">
+                        <span class="num">{{ loop.index }}</span>
+                        {{ step.label }}
+                    </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        <!-- ── Tabs ── -->
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('orders')">📋 Orders</div>
+            <div class="tab" onclick="switchTab('notifications')">📱 Notifications</div>
+            <div class="tab" onclick="switchTab('walog')">💬 WA Log</div>
+            <div class="tab" onclick="switchTab('api')">🔌 API</div>
+        </div>
+
+        <!-- Tab: Orders -->
+        <div class="tab-content active" id="tab-orders">
+            {% if orders %}
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for order in orders %}
+                    <tr>
+                        <td>{{ order.order_id }}</td>
+                        <td>
+                            <span class="badge {{ 'completed' if order.current_status == 'Completed' else 'pending' }}">
+                                {{ order.current_status }}
+                            </span>
+                        </td>
+                        <td>{{ order.created_at.strftime('%Y-%m-%d %H:%M') if order.created_at else '—' }}</td>
+                        <td>
+                            {% if order.current_status != 'Completed' %}
+                            <form method="post" action="/api/notifications/send/{{ order.order_id }}" style="display:inline;">
+                                <button type="button" class="notify-btn" onclick="sendNotify({{ order.order_id }})">📱 Notify</button>
+                            </form>
+                            {% else %}
+                            <span style="color:#555">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color:#666; padding:20px; text-align:center;">No orders yet. Click <strong>Start</strong> to create one.</p>
+            {% endif %}
+        </div>
+
+        <!-- Tab: Notifications -->
+        <div class="tab-content" id="tab-notifications">
+            {% if notifications %}
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Order</th>
+                        <th>User</th>
+                        <th>Phone</th>
+                        <th>Status Sent</th>
+                        <th>Time</th>
+                        <th>State</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for n in notifications %}
+                    <tr>
+                        <td>{{ n.notification_id }}</td>
+                        <td>#{{ n.order_id }}</td>
+                        <td>{{ n.full_name }}</td>
+                        <td>{{ n.phone_number }}</td>
+                        <td><span class="badge sent">{{ n.status_at_send }}</span></td>
+                        <td>{{ n.sent_at.strftime('%H:%M:%S') if n.sent_at else '—' }}</td>
+                        <td>
+                            {% if n.confirmed_at %}
+                                <span class="badge confirmed">Confirmed</span>
+                            {% elif n.delivered %}
+                                <span class="badge sent">Delivered</span>
+                            {% else %}
+                                <span class="badge pending">Pending</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color:#666; padding:20px; text-align:center;">No notifications sent yet.</p>
+            {% endif %}
+        </div>
+
+        <!-- Tab: WhatsApp Log -->
+        <div class="tab-content" id="tab-walog">
+            {% if wa_log %}
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Msg ID</th>
+                        <th>Phone</th>
+                        <th>Message</th>
+                        <th>Sent At</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in wa_log %}
+                    <tr>
+                        <td style="font-size:0.75em; color:#888;">{{ m.message_id }}</td>
+                        <td>{{ m.phone }}</td>
+                        <td style="max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ m.message[:60] }}...</td>
+                        <td>{{ m.sent_at }}</td>
+                        <td><span class="badge sent">{{ m.status }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color:#666; padding:20px; text-align:center;">No WhatsApp messages logged yet.</p>
+            {% endif %}
+        </div>
+
+        <!-- Tab: API Reference -->
+        <div class="tab-content" id="tab-api">
+            <div class="api-ref">
+                <h2 style="margin-top:0;">API Endpoints (for WhatsApp Bot)</h2>
+                <div class="api-row">
+                    <span class="method get">GET</span>
+                    <code>/api/orders/pending</code>
+                    <div class="api-desc">Get all orders with pending (non-completed) status</div>
+                </div>
+                <div class="api-row">
+                    <span class="method get">GET</span>
+                    <code>/api/orders/{order_id}</code>
+                    <div class="api-desc">Get a single order by ID</div>
+                </div>
+                <div class="api-row">
+                    <span class="method get">GET</span>
+                    <code>/api/orders/{order_id}/responsible-users</code>
+                    <div class="api-desc">Get users responsible for the current stage of an order</div>
+                </div>
+                <div class="api-row">
+                    <span class="method post">POST</span>
+                    <code>/api/notifications/send/{order_id}</code>
+                    <div class="api-desc">Send WhatsApp notifications to all responsible users for an order</div>
+                </div>
+                <div class="api-row">
+                    <span class="method post">POST</span>
+                    <code>/api/notifications/confirm/{notification_id}</code>
+                    <div class="api-desc">Mark a notification as confirmed/acknowledged</div>
+                </div>
+                <div class="api-row">
+                    <span class="method get">GET</span>
+                    <code>/api/notifications/{order_id}</code>
+                    <div class="api-desc">Get all notification records for an order</div>
+                </div>
+                <div class="api-row">
+                    <span class="method get">GET</span>
+                    <code>/api/whatsapp/log</code>
+                    <div class="api-desc">View dummy WhatsApp message log (debug)</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        function switchTab(name) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+            document.getElementById('tab-' + name).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        async function sendNotify(orderId) {
+            const res = await fetch('/api/notifications/send/' + orderId, { method: 'POST' });
+            const data = await res.json();
+            if (data.notifications_sent > 0) {
+                alert('✅ Sent ' + data.notifications_sent + ' notification(s) for Order #' + orderId);
+            } else {
+                alert('⚠️ No users to notify for Order #' + orderId + ' (' + (data.message || data.current_status) + ')');
+            }
+            location.reload();
+        }
+    </script>
+</body>
+</html>
