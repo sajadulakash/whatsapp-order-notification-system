@@ -54,13 +54,20 @@ STATUS_TO_USER_TYPE = {
     "CEO Pending":           "CEO",
 }
 
-# Statuses that should be monitored (CEO has no deadline)
-MONITORED_STATUSES = [
+# Statuses that get reminder → warning → escalation
+ESCALATION_STATUSES = [
     "OPS Pending",
     "SCM Pending",
     "SCM-Analyst Pending",
     "SCM-Finalist Pending",
 ]
+
+# ALL statuses that should be monitored (including CEO)
+MONITORED_STATUSES = ESCALATION_STATUSES + ["CEO Pending"]
+
+# CEO gets repeated reminders at this interval (no deadline)
+CEO_REMINDER_INTERVAL = REMINDER_3H_SECONDS   # every 20s in test / 3h in prod
+CEO_MAX_REMINDERS = 8                          # stop after 8 reminders (≈ 2 days)
 
 
 def _conn():
@@ -244,6 +251,112 @@ def _send_ceo_escalation(order_id: int, status: str):
     _record_reminder(order_id, escalation_key)
 
 
+def _send_ceo_periodic_reminder(order_id: int, status: str, elapsed: float):
+    """
+    Send up to CEO_MAX_REMINDERS (8) reminders to CEO, each with a unique
+    escalating message.  After the 8th reminder (~2 days) the system stops.
+
+    Reminder schedule (test → production):
+      #1  20s →  3h     Gentle first nudge
+      #2  40s →  6h     Half-day check
+      #3  60s →  9h     End of day 1
+      #4  80s → 12h     Day 1 done – new day starts
+      #5 100s → 15h     More than a day passed
+      #6 120s → 18h     Approaching 2 days
+      #7 140s → 21h     Almost 2 days – urgent
+      #8 160s → 24h     FINAL reminder – system stops
+    """
+    # Which reminder number are we on?
+    reminder_num = int(elapsed // CEO_REMINDER_INTERVAL)
+    if reminder_num < 1:
+        return
+
+    # Cap at CEO_MAX_REMINDERS — stop sending after that
+    if reminder_num > CEO_MAX_REMINDERS:
+        return
+
+    reminder_key = f"ceo_reminder_{reminder_num}_{status}"
+    if _has_reminder_been_sent(order_id, reminder_key):
+        return
+
+    users = _get_users_for_status(status)
+
+    # ── Build a unique message for each reminder ──
+    CEO_MESSAGES = {
+        1: (
+            f"🔔 *Reminder* — Order #{order_id}\n\n"
+            f"Hi {{name}}, this order is waiting for your approval.\n"
+            f"Current status: *{status}*\n\n"
+            f"Please review and take action when you get a chance."
+        ),
+        2: (
+            f"🔔 *Reminder* — Order #{order_id}\n\n"
+            f"Hi {{name}}, just a follow-up — this order is still pending.\n"
+            f"Current status: *{status}*\n\n"
+            f"⏳ It has been pending for a while now. "
+            f"Please review at your earliest convenience."
+        ),
+        3: (
+            f"⚠️ *End of Day Reminder* — Order #{order_id}\n\n"
+            f"Hi {{name}}, the first working day is ending and this "
+            f"order is still pending your approval.\n"
+            f"Current status: *{status}*\n\n"
+            f"📋 Please try to complete it before the day ends."
+        ),
+        4: (
+            f"⚠️ *Day 2 — Still Pending* — Order #{order_id}\n\n"
+            f"Hi {{name}}, already *1 day has passed* and you haven't "
+            f"completed your task yet.\n"
+            f"Current status: *{status}*\n\n"
+            f"⏰ A new working day has started. Please prioritize this order."
+        ),
+        5: (
+            f"⚠️ *Overdue* — Order #{order_id}\n\n"
+            f"Hi {{name}}, *more than 1 day has passed* since this order "
+            f"reached your desk and it's still not done.\n"
+            f"Current status: *{status}*\n\n"
+            f"🚨 This is getting delayed. Please take action now."
+        ),
+        6: (
+            f"🚨 *Urgent* — Order #{order_id}\n\n"
+            f"Hi {{name}}, this order has been pending for almost *2 days* "
+            f"now.\n"
+            f"Current status: *{status}*\n\n"
+            f"The team is waiting on your approval to move forward. "
+            f"Please complete your task as soon as possible."
+        ),
+        7: (
+            f"🚨 *Critical Delay* — Order #{order_id}\n\n"
+            f"Hi {{name}}, *almost 2 full days have passed* and this order "
+            f"is still stuck at your step.\n"
+            f"Current status: *{status}*\n\n"
+            f"❗ This is causing significant delays downstream. "
+            f"Please act immediately."
+        ),
+        8: (
+            f"🛑 *FINAL REMINDER* — Order #{order_id}\n\n"
+            f"Hi {{name}}, this is your *last reminder*.\n\n"
+            f"⏳ *2 days have passed* and you still haven't completed "
+            f"your task.\n"
+            f"Current status: *{status}*\n\n"
+            f"The system will *stop sending reminders* after this message.\n"
+            f"Please complete your task immediately."
+        ),
+    }
+
+    message_template = CEO_MESSAGES[reminder_num]
+
+    for user in users:
+        message = message_template.format(name=user["full_name"])
+        send_whatsapp_message(user["phone_number"], message)
+        logger.info(
+            "🔔 CEO reminder #%d/%d sent to %s for order #%s",
+            reminder_num, CEO_MAX_REMINDERS, user["full_name"], order_id,
+        )
+
+    _record_reminder(order_id, reminder_key)
+
+
 # ═══════════════════════════════════════════════
 #  Main Scheduler Loop
 # ═══════════════════════════════════════════════
@@ -272,17 +385,22 @@ def _check_all_orders():
         for order_id, status, changed_at in rows:
             elapsed = (now - changed_at).total_seconds()
 
-            # Check escalation first (highest priority)
-            if elapsed >= DEADLINE_9H_SECONDS:
-                _send_ceo_escalation(order_id, status)
+            if status == "CEO Pending":
+                # CEO gets repeated reminders, no deadline/escalation
+                _send_ceo_periodic_reminder(order_id, status, elapsed)
+            else:
+                # Other roles: reminder → warning → CEO escalation
+                # Check escalation first (highest priority)
+                if elapsed >= DEADLINE_9H_SECONDS:
+                    _send_ceo_escalation(order_id, status)
 
-            # Check 6-hour warning
-            if elapsed >= WARNING_6H_SECONDS:
-                _send_6h_warning(order_id, status)
+                # Check 6-hour warning
+                if elapsed >= WARNING_6H_SECONDS:
+                    _send_6h_warning(order_id, status)
 
-            # Check 3-hour reminder
-            if elapsed >= REMINDER_3H_SECONDS:
-                _send_3h_reminder(order_id, status)
+                # Check 3-hour reminder
+                if elapsed >= REMINDER_3H_SECONDS:
+                    _send_3h_reminder(order_id, status)
 
     except Exception as e:
         logger.error("❌ Scheduler error: %s", e)
